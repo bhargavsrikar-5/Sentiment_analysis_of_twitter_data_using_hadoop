@@ -1,0 +1,133 @@
+ 1. INSTALL JAVA & SET JAVA_HOME
+
+# Update and install Java
+sudo apt update
+sudo apt install openjdk-17-jdk -y
+
+# Verify installation
+java -version
+
+# Find Java path and set JAVA_HOME
+readlink -f $(which java)
+# Example: /usr/lib/jvm/java-17-openjdk-amd64/bin/java
+
+# Add to ~/.bashrc (or use nano ~/.bashrc)
+echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' >> ~/.bashrc
+echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.bashrc
+source ~/.bashrc
+
+
+# 2. DOWNLOAD & CONFIGURE HADOOP
+
+cd ~
+wget https://downloads.apache.org/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz
+tar -xvzf hadoop-3.3.6.tar.gz
+mv hadoop-3.3.6 hadoop
+
+# Add Hadoop variables to ~/.bashrc
+echo 'export HADOOP_HOME=~/hadoop' >> ~/.bashrc
+echo 'export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin' >> ~/.bashrc
+source ~/.bashrc
+
+# Set Java path in hadoop-env.sh
+nano ~/hadoop/etc/hadoop/hadoop-env.sh
+# Add:
+# export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+
+# 3. FORMAT NAMENODE & START HDFS
+
+# Update core-site.xml and hdfs-site.xml as needed
+hdfs namenode -format
+start-dfs.sh
+jps  # Check NameNode, DataNode, SecondaryNameNode are running
+
+# 4. UPLOAD DATA TO HDFS
+
+hdfs dfs -mkdir /twitter
+hdfs dfs -put twitter_training.csv /twitter
+
+
+# 5. MAPPER (mapper.py)
+
+#!/usr/bin/env python3
+import sys
+import csv
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        row = next(csv.reader([line]))
+        if len(row) < 3 or row[0].lower() == "tweet id":
+            continue
+        sentiment = row[2].strip()
+        print(f"{sentiment}\t1")
+    except Exception:
+        continue
+
+
+# 6. REDUCER (reducer.py)
+
+#!/usr/bin/env python3
+import sys
+
+current_sentiment = None
+current_count = 0
+
+for line in sys.stdin:
+    sentiment, count = line.strip().split("\t")
+    count = int(count)
+
+    if sentiment == current_sentiment:
+        current_count += count
+    else:
+        if current_sentiment:
+            print(f"{current_sentiment}\t{current_count}")
+        current_sentiment = sentiment
+        current_count = count
+
+if current_sentiment:
+    print(f"{current_sentiment}\t{current_count}")
+
+# 7. RUN HADOOP STREAMING JOB
+
+hadoop jar ~/hadoop/share/hadoop/tools/lib/hadoop-streaming-3.3.6.jar \
+  -input /twitter/twitter_training.csv \
+  -output /output_twitter \
+  -mapper mapper.py \
+  -reducer reducer.py
+
+
+# 8. FETCH OUTPUT
+
+hdfs dfs -cat /output_twitter/part-00000 > output.txt
+
+
+# 9. VISUALIZATION SCRIPT (visualize_sentiment.py)
+
+import os
+import matplotlib.pyplot as plt
+
+sentiment_counts = {
+    "Positive": 266,
+    "Negative": 285,
+    "Neutral": 277
+}
+
+sentiments = list(sentiment_counts.keys())
+counts = list(sentiment_counts.values())
+
+plt.figure(figsize=(8, 6))
+plt.bar(sentiments, counts, color=['green', 'red', 'gray'])
+plt.title("Twitter Sentiment Distribution")
+plt.xlabel("Sentiment")
+plt.ylabel("Tweet Count")
+
+# Save to Downloads (adjust path if needed)
+desktop_path = "/mnt/c/Users/Sreekanth/Downloads"
+plt.savefig(os.path.join(desktop_path, 'sentiment_bar.png'))
+plt.show()
+
+
